@@ -1,0 +1,192 @@
+---
+title: "What's in the 'This Time is Different' Data?"
+author: "Sam Mather"
+date: "2025-05-11"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## From the Debt to GDP ratio data: Line Graphs of Debt as a Percentage of GDP
+
+``` {r, fig.width = 10, fig.height = 11}
+
+## load libraries
+
+library(tidyverse)
+
+library(colorspace)
+
+## import data
+
+debtGDPdata <- read_csv("C:\\Users\\samma\\Downloads\\DebttoGDPTidy - Sheet1(6).csv")
+
+## prepare data
+
+debtGDPdata <- debtGDPdata %>% arrange(`REGION`, `COUNTRY`, `YEAR`)
+
+
+
+```
+
+Let's take an initial look:
+
+``` {r, fig.width = 10, fig.height = 11}
+## prepare basic graph
+
+DGDPline <- ggplot(data = debtGDPdata, mapping = aes(x = YEAR, y = `GOVERNMENT DEBT AS % OF GDP`, color = `COUNTRY`)) + scale_y_log10(breaks = c(1, 10, 100, 1000, 10000), labels = c(1, 10, 100, 1000, 10000)) + theme(legend.position = "none")
+
+## make graph
+
+DGDPline + geom_line(aes(group = `COUNTRY`)) + scale_color_manual(values = qualitative_hcl(70, palette = "Dark 3")) + facet_wrap(~`REGION`, scales = "free", ncol = 2)
+
+```
+
+That's something! But the colors are less helpful than I hoped. Also I want to see it with consistent scales - right now you can compare countries within regions, and with some work you can get a sense of how regions compare, but you can't really eyeball comparisons of countries across regions. 
+
+Even at this stage, though, you can see there are weird gaps in the data. Just eyeballing it, the major colonial powers and the prosperous settler colonies have the most continuous data. Gaps around World War II are very common. 
+
+``` {r, fig.width = 10, fig.height = 11}
+## version 2
+
+DGDPline <- ggplot(data = debtGDPdata, mapping = aes(x = YEAR, y = `GOVERNMENT DEBT AS % OF GDP`)) + scale_y_log10(breaks = c(1, 10, 100, 1000, 10000), labels = c(1, 10, 100, 1000, 10000)) + theme(legend.position = "none")
+
+## make graph
+
+DGDPline + geom_line(aes(group = `COUNTRY`), color = "steelblue") + facet_wrap(~`REGION`, ncol = 2)
+
+```
+
+OK, so there's not much data before 1850, and only the US, UK, and Sweden go back past 1800. Also, I'm using a log scale because otherwise Nicaragua's 5000% percent years would make it useless. The downside of the log scale is that anything below 1%, despite not practically mattering, gets a huge amount of space. Even if debt/GDP quadruples from .2% to .8%, in terms of "is this a lot of debt?", it's all just less than 1%. Those dramatic valleys are misleading, but I don't want to just drop the data.
+
+I think there are two tracks now: a visual that allows viewers to compare whole regions to each other, and a visual for each region that allows comparisons between countries in that region. 
+
+Starting with the first, which is more similar to the previous graphs:
+
+``` {r, fig.width = 10, fig.height = 11}
+
+## create a variable that's a winsorized version of debt%GDP and exclude all data before 1825
+
+
+
+```
+
+Before I make the region-specific graphs, I note there are only 70 countries in this data and it's a very different 70 than I'm used to from working in international development. I want to see which ones are here. 
+
+``` {r}
+
+library(sf)
+
+library(giscoR)
+
+library(maps)
+
+by_country <- debtGDPdata %>% distinct(`COUNTRY`)
+
+debtGDPdata <- debtGDPdata %>% filter(debtGDPdata$`GOVERNMENT DEBT AS % OF GDP`!= "")
+
+debtGDPdata <- debtGDPdata %>% add_count(COUNTRY, name = "observations")
+
+## ggplot() + geom_map(data = WorldMap, map = WorldMap, aes(x = long, y = lat, group = group, map_id=region), fill = "white", colour = "#7f7f7f", linewidth=0.5) + coord_map("rectangular", lat0=0, xlim=c(-180,180), ylim=c(-60, 90)) + labs(fill="legend") + theme_bw()
+
+library(viridis)
+
+```
+
+And to get a sense of how much data we have from each one
+
+``` {r}
+
+## make a map for the 19th, 20th, and 21st centuries
+
+
+
+## calculate what percentage of each century each country has data
+
+debtGDPdata <- debtGDPdata %>% mutate(`CENTURY` = case_when(
+  YEAR <= 1899 & YEAR >= 1800 ~ "19th",
+  YEAR <= 1999 & YEAR >= 1900 ~ "20th",
+  YEAR <= 2010 & YEAR >= 2000 ~ "21st",
+  TRUE ~ NA_character_
+))
+
+country_century_counts <- debtGDPdata %>% count(COUNTRY, CENTURY)
+
+wide_counts <- country_century_counts %>% pivot_wider(names_from = CENTURY, values_from = n, values_fill = 0)
+
+by_country <- by_country %>% left_join(wide_counts, by = "COUNTRY")
+
+by_country <- by_country %>% mutate(`21stpc` = `21st` / 11)
+
+by_country <- by_country %>% left_join(debtGDPdata %>% select(COUNTRY, INDEPENDENCE) %>% distinct(COUNTRY, INDEPENDENCE), by = "COUNTRY")
+
+library(stringr)
+
+by_country <- by_country %>% mutate(ind2digit = as.numeric(str_sub(INDEPENDENCE, -2, -1)))
+
+by_country <- by_country %>% mutate(yearspossible = 100 - ind2digit)
+
+by_country <- by_country %>% mutate(`20thpc` = `20th` / 100)
+
+by_country <- by_country %>% mutate(`19thpc` = `19th` / 100)
+
+by_country <- by_country %>% mutate(`totalpc` = (`20th` + `19th` + `21st`) / 211)
+
+## shade each country accordingly 
+
+WorldMap <- map_data("world")
+
+WorldMap <- WorldMap %>% mutate(COUNTRY = region)
+
+WorldMap <- left_join(by_country, WorldMap)
+
+p <- ggplot(data = WorldMap, aes(x = long, y = lat, group = group, fill = totalpc)) + scale_fill_gradient(high = "#000066", low = "white") + guides(fill = "none")
+
+p + geom_polygon(color = "gray90", linewidth = .1)
+
+```
+
+You might have noticed a lot of these countries didn't exist until well into the 20th century, but there's earlier data for some of them. I can wrap my head around a GDP analogue/estimate, and maybe the idea that there was a subnational government analogous to national government that carried debt. Are they using the Ottoman Empire for "Turkey" before 1921? And even though I can imagine a way it's possible, I'm not convinced it makes sense to say that Zimbabwe had a "national debt" 55 years before independence. To see how common this problem is, I plotted year of independence on the regional line graphs from earlier. I pulled independence years from Wikipedia (and wasn't rigorously consistent about using the year independence was declared vs the year the war of independence was won), but looking at a different R-R data set later I found they have years independence there. 
+
+``` {r}
+
+#add independence diamonds in red to each region
+
+## calculate the number of countries with at least a decade of data before independence
+
+```
+
+Weird. And not explained in the codebooks. 
+
+Anyway, now we have our countries mapped. I'll use that for the regional graphs. 
+
+```{r}
+
+## create a regional map, with countries color coded
+
+## create a regional graph, with countries color coded the same way
+
+## combine
+
+```
+
+And to put a finishing touch on the faceted global version. 
+
+``` {r}
+
+## create regional maps shaded blue
+
+## create big blue line graph
+
+## combine
+
+```
+
+The other big data contribution of "This Time is Different" is a comprehensive list of financial crises faced by each of these 70 countries since 1800. I got the data from a different part of Reinhart's website and it's easier to work with; maybe should have started there.(Confirmed, they are using the Ottoman Empire for Turkey before independence). 
+
+OK, let's plot these:
+
+
+That's pretty difficult to parse. Let's try maps. Shade countries by number of external debt crises and banking crises. 
+
+Let's try plotting again, but with Europe split up even more. 
